@@ -1,7 +1,6 @@
-import Image from "next/image"
-import Link from "next/link"
 import { PageLayout } from "@/components/layout/page-layout"
 import { BentoGrid, BentoGridItem } from "@/components/ui/bento-grid"
+import { EngineeringCardImage } from "@/components/ui/engineering-card-image"
 import { engineeringComponents } from "@/data/engineering"
 import type { Locale } from "@/i18n/config"
 import { getDictionary } from "@/i18n/dictionaries"
@@ -35,19 +34,11 @@ export const EngineeringView = ({ locale }: { locale: Locale }) => {
                 description={item.description}
                 className={index === 0 ? "md:col-span-2 md:row-span-2" : ""}
                 header={
-                  <div
-                    className={`relative mb-4 w-full overflow-hidden rounded-lg ${
-                      index === 0 ? "h-48 sm:h-64" : "h-36 sm:h-40"
-                    }`}
-                  >
-                    <Image
-                      src={engineeringComponents[index].image}
-                      alt={item.title}
-                      fill
-                      className="object-cover object-center"
-                      sizes="(max-width: 768px) 100vw, 33vw"
-                    />
-                  </div>
+                  <EngineeringCardImage
+                    src={engineeringComponents[index].image}
+                    alt={item.title}
+                    featured={index === 0}
+                  />
                 }
               />
             ))}

@@ -7,8 +7,11 @@ export const companyInfo = {
   location: "Laprida 631, Avellaneda, Buenos Aires, Argentina",
   email: "ventas@airproducts.com.ar",
   phones: ["+54 (11) 7725-0196", "+54 (11) 4222-1008"],
+  coordinates: { lat: -34.658353, lng: -58.354505 },
+  mapEmbedUrl:
+    "https://maps.google.com/maps?q=-34.658353,-58.354505&hl=es&z=15&output=embed",
   mapUrl:
-    "https://www.google.com/maps?ll=-34.658353,-58.354505&z=15&t=m&hl=es-419&gl=AR&mapclient=embed&q=Laprida+631+B1871DUH+Dock+Sud+Provincia+de+Buenos+Aires",
+    "https://www.google.com/maps/search/?api=1&query=Laprida+631,+Avellaneda,+Buenos+Aires,+Argentina",
 }
 
 export const aboutParagraphs = [

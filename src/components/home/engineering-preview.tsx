@@ -1,8 +1,8 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { BentoGrid, BentoGridItem } from "@/components/ui/bento-grid"
+import { EngineeringCardImage } from "@/components/ui/engineering-card-image"
 import { engineeringComponents } from "@/data/engineering"
 import { routeMap } from "@/i18n/config"
 import { useLocale } from "@/i18n/locale-context"
@@ -31,15 +31,11 @@ export const EngineeringPreview = () => {
               description={`${item.description.slice(0, 120)}...`}
               className={index === 0 || index === 3 ? "md:col-span-2" : ""}
               header={
-                <div className="relative mb-4 h-28 w-full overflow-hidden rounded-lg sm:h-32">
-                  <Image
-                    src={engineeringComponents[index].image}
-                    alt={item.title}
-                    fill
-                    className="object-cover object-center"
-                    sizes="(max-width: 768px) 100vw, 33vw"
-                  />
-                </div>
+                <EngineeringCardImage
+                  src={engineeringComponents[index].image}
+                  alt={item.title}
+                  featured={index === 0}
+                />
               }
             />
           ))}

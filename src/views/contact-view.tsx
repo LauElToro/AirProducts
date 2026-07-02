@@ -1,5 +1,6 @@
 import { PageLayout } from "@/components/layout/page-layout"
 import { ContactForm } from "@/components/contact/contact-form"
+import { ContactMap } from "@/components/contact/contact-map"
 import { companyInfo } from "@/data/company"
 import type { Locale } from "@/i18n/config"
 import { getDictionary } from "@/i18n/dictionaries"
@@ -56,19 +57,11 @@ export const ContactView = ({ locale }: { locale: Locale }) => {
               ))}
             </div>
 
-            <div className="mt-8 overflow-hidden rounded-xl border border-slate-200">
-              <iframe
-                src={companyInfo.mapUrl}
-                width="100%"
-                height="280"
-                className="min-h-[240px] sm:min-h-[280px]"
-                style={{ border: 0 }}
-                allowFullScreen
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                title="Air Products SRL location"
-              />
-            </div>
+            <ContactMap
+              openInMapsLabel={
+                locale === "es" ? "Abrir en Google Maps" : "Open in Google Maps"
+              }
+            />
           </div>
 
           <div>
