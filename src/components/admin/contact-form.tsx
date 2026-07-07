@@ -81,8 +81,7 @@ export const ContactForm = ({
         return
       }
 
-      router.push("/admin/contactos")
-      router.refresh()
+      router.push(`/admin/contactos?refresh=${Date.now()}`)
     } catch {
       setError("Error de conexión")
     } finally {

@@ -50,13 +50,13 @@ export default function AdminAsistentePage() {
       const data = (await res.json()) as { session?: { messages: ChatMessage[] }; error?: string }
       if (data.session?.messages) {
         setMessages(data.session.messages)
-      } else if (data.error) {
+      } else if (!res.ok || data.error) {
         setMessages((prev) => [
           ...prev,
           {
             id: `err-${Date.now()}`,
             role: "assistant",
-            content: `Error: ${data.error}`,
+            content: data.error ?? "No se pudo conectar con Gemini. Intentá de nuevo en unos minutos.",
             timestamp: new Date().toISOString(),
           },
         ])

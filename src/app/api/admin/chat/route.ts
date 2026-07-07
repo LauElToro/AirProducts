@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 import { v4 as uuidv4 } from "uuid"
-import { requireAuth, jsonError, jsonOk } from "@/lib/admin/api-helpers"
+import { requireAuth, jsonError, jsonOk, geminiRouteError } from "@/lib/admin/api-helpers"
 import { chatWithAssistant } from "@/lib/admin/gemini"
 import { getChatSessions, saveChatSessions } from "@/lib/admin/storage"
 import type { ChatMessage } from "@/lib/admin/types"
@@ -86,8 +86,7 @@ export async function POST(request: NextRequest) {
       session,
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Error en el chat"
-    return jsonError(message, 500)
+    return geminiRouteError(error)
   }
 }
 

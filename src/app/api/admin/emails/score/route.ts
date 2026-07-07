@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { requireAuth, jsonError, jsonOk } from "@/lib/admin/api-helpers"
+import { requireAuth, jsonError, jsonOk, geminiRouteError } from "@/lib/admin/api-helpers"
 import { scoreEmail, getScoreThreshold } from "@/lib/admin/gemini"
 import {
   createEditRecord,
@@ -68,7 +68,6 @@ export async function POST(request: NextRequest) {
       canSend: result.score >= threshold,
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Error al calificar email"
-    return jsonError(message, 500)
+    return geminiRouteError(error)
   }
 }

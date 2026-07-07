@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { v4 as uuidv4 } from "uuid"
 import { requireAuth, jsonError, jsonOk } from "@/lib/admin/api-helpers"
 import {
@@ -13,7 +13,9 @@ export async function GET() {
   if (authError) return authError
 
   const contacts = await getContacts()
-  return jsonOk(contacts.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)))
+  return NextResponse.json(contacts.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), {
+    headers: { "Cache-Control": "no-store" },
+  })
 }
 
 export async function POST(request: NextRequest) {

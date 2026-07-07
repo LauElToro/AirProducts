@@ -60,7 +60,7 @@ export default function AdminEmailsContent() {
         body: JSON.stringify({ contactId: selectedContactId, purpose }),
       })
       const data = (await res.json()) as { asunto?: string; mensaje?: string; error?: string }
-      if (data.error) return alert(data.error)
+      if (!res.ok || data.error) return alert(data.error ?? "Error al generar borrador")
       setAsunto(data.asunto ?? "")
       setMensaje(data.mensaje ?? "")
       setScore(null)
@@ -121,7 +121,7 @@ export default function AdminEmailsContent() {
         details: EmailRecord["scoreDetails"]
         error?: string
       }
-      if (data.error) return alert(data.error)
+      if (!res.ok || data.error) return alert(data.error ?? "Error al calificar")
       setScore(data.score)
       setScoreFeedback(data.feedback)
       setScoreDetails(data.details)

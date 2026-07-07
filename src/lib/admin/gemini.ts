@@ -1,15 +1,110 @@
 import { GoogleGenerativeAI } from "@google/generative-ai"
 import type { Contact } from "./types"
 
+export class GeminiHttpError extends Error {
+  status: number
+  retryAfterSeconds?: number
+
+  constructor(message: string, status: number, retryAfterSeconds?: number) {
+    super(message)
+    this.name = "GeminiHttpError"
+    this.status = status
+    this.retryAfterSeconds = retryAfterSeconds
+  }
+}
+
 function getGeminiClient() {
   const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) throw new Error("GEMINI_API_KEY no configurado")
+  if (!apiKey) throw new GeminiHttpError("GEMINI_API_KEY no configurado", 503)
   return new GoogleGenerativeAI(apiKey)
 }
 
-function getModel() {
-  const modelName = process.env.GEMINI_MODEL ?? "gemini-2.0-flash"
-  return getGeminiClient().getGenerativeModel({ model: modelName })
+function getModelCandidates(): string[] {
+  const configured = process.env.GEMINI_MODEL ?? "gemini-2.5-flash"
+  const fallbacks = (process.env.GEMINI_MODEL_FALLBACKS ?? "gemini-2.5-flash-lite,gemini-1.5-flash")
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean)
+
+  return [...new Set([configured, ...fallbacks])]
+}
+
+function isRetryableGeminiError(error: unknown): boolean {
+  const raw = error instanceof Error ? error.message : String(error)
+  return (
+    raw.includes("429") ||
+    raw.includes("Quota exceeded") ||
+    raw.includes("RESOURCE_EXHAUSTED") ||
+    raw.includes("Too Many Requests") ||
+    raw.includes("503 Service Unavailable") ||
+    raw.includes("model is overloaded") ||
+    raw.includes("limit: 0")
+  )
+}
+
+export function parseGeminiError(error: unknown): GeminiHttpError {
+  if (error instanceof GeminiHttpError) return error
+
+  const raw = error instanceof Error ? error.message : String(error)
+
+  if (
+    raw.includes("429") ||
+    raw.includes("Quota exceeded") ||
+    raw.includes("RESOURCE_EXHAUSTED") ||
+    raw.includes("Too Many Requests")
+  ) {
+    const retryMatch = raw.match(/retry in ([\d.]+)s/i)
+    const retryAfterSeconds = retryMatch ? Math.ceil(Number(retryMatch[1])) : undefined
+    const retryHint = retryAfterSeconds
+      ? ` Intentá de nuevo en ${retryAfterSeconds} segundos.`
+      : ""
+
+    return new GeminiHttpError(
+      `Cuota de Gemini agotada para el modelo configurado.${retryHint} Revisá uso en Google AI Studio o cambiá GEMINI_MODEL.`,
+      429,
+      retryAfterSeconds
+    )
+  }
+
+  if (raw.includes("API key not valid") || raw.includes("API_KEY_INVALID")) {
+    return new GeminiHttpError("GEMINI_API_KEY inválida. Verificá la clave en Vercel.", 503)
+  }
+
+  if (raw.includes("404") && raw.includes("models/")) {
+    return new GeminiHttpError(
+      "Modelo Gemini no disponible. Probá GEMINI_MODEL=gemini-2.5-flash en las variables de entorno.",
+      503
+    )
+  }
+
+  if (raw.includes("GoogleGenerativeAI Error")) {
+    return new GeminiHttpError(
+      "No se pudo conectar con Gemini. Verificá la API key y el modelo configurado.",
+      502
+    )
+  }
+
+  return new GeminiHttpError(raw || "Error desconocido de Gemini", 500)
+}
+
+async function generateText(prompt: string): Promise<string> {
+  const candidates = getModelCandidates()
+  let lastError: unknown
+
+  for (const modelName of candidates) {
+    try {
+      const model = getGeminiClient().getGenerativeModel({ model: modelName })
+      const result = await model.generateContent(prompt)
+      return result.response.text().trim()
+    } catch (error) {
+      lastError = error
+      if (!isRetryableGeminiError(error)) {
+        throw parseGeminiError(error)
+      }
+    }
+  }
+
+  throw parseGeminiError(lastError)
 }
 
 export type EmailDraftRequest = {
@@ -28,7 +123,6 @@ export type EmailDraftResult = {
 export async function generateEmailDraft(
   request: EmailDraftRequest
 ): Promise<EmailDraftResult> {
-  const model = getModel()
   const contactName = [request.contact.nombre, request.contact.apellido]
     .filter(Boolean)
     .join(" ")
@@ -61,14 +155,13 @@ IMPORTANTE:
 Respondé ÚNICAMENTE con JSON válido (sin markdown):
 {"asunto": "...", "mensaje": "..."}`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text().trim()
+  const text = await generateText(prompt)
   const jsonMatch = text.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) throw new Error("Gemini no devolvió JSON válido")
+  if (!jsonMatch) throw new GeminiHttpError("Gemini no devolvió JSON válido", 502)
 
   const parsed = JSON.parse(jsonMatch[0]) as EmailDraftResult
   if (!parsed.asunto || !parsed.mensaje) {
-    throw new Error("Respuesta incompleta de Gemini")
+    throw new GeminiHttpError("Respuesta incompleta de Gemini", 502)
   }
   return parsed
 }
@@ -90,8 +183,6 @@ export async function scoreEmail(
   mensaje: string,
   contact?: Contact
 ): Promise<EmailScoreResult> {
-  const model = getModel()
-
   const prompt = `Sos un experto en email marketing B2B industrial. Evaluá este email comercial de Air Products SRL (compresores de oxígeno).
 
 DESTINATARIO: ${contact ? `${contact.nombre || ""} ${contact.apellido || ""} (${contact.empresa || "sin empresa"})` : "Contacto comercial"}
@@ -114,10 +205,9 @@ Respondé ÚNICAMENTE con JSON válido (sin markdown):
   }
 }`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text().trim()
+  const text = await generateText(prompt)
   const jsonMatch = text.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) throw new Error("Gemini no devolvió JSON válido para scoring")
+  if (!jsonMatch) throw new GeminiHttpError("Gemini no devolvió JSON válido para scoring", 502)
 
   const parsed = JSON.parse(jsonMatch[0]) as EmailScoreResult
   parsed.score = Math.min(100, Math.max(0, Math.round(parsed.score)))
@@ -159,7 +249,6 @@ export async function chatWithAssistant(
   messages: { role: "user" | "assistant"; content: string }[],
   currentSection?: string
 ): Promise<string> {
-  const model = getModel()
   const sectionNote = currentSection
     ? `\nEl usuario está actualmente en la sección: ${currentSection}`
     : ""
@@ -176,8 +265,7 @@ ${history}
 
 Respondé al último mensaje del usuario de forma clara y útil. Máximo 150 palabras.`
 
-  const result = await model.generateContent(prompt)
-  return result.response.text().trim()
+  return generateText(prompt)
 }
 
 export function getScoreThreshold(): number {
