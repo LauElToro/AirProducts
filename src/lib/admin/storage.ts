@@ -24,8 +24,31 @@ function useBlobStorage(): boolean {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN)
 }
 
+type BlobAccess = "public" | "private"
+
+function blobAccess(): BlobAccess {
+  return process.env.BLOB_ACCESS === "public" ? "public" : "private"
+}
+
 function blobPath(filename: string): string {
   return `${BLOB_PREFIX}/${filename}`
+}
+
+function blobAccessHint(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes("private access on a public store")) {
+    throw new Error(
+      "Vercel Blob: tu store es público pero el código usa acceso privado. " +
+        "Creá un store Private en Vercel (Storage → Blob) y conectalo al proyecto, " +
+        "o agregá BLOB_ACCESS=public al .env (no recomendado: expone datos del admin)."
+    )
+  }
+  if (message.includes("public access on a private store")) {
+    throw new Error(
+      "Vercel Blob: tu store es privado. Quitá BLOB_ACCESS=public del .env."
+    )
+  }
+  throw error instanceof Error ? error : new Error(message)
 }
 
 async function ensureDataDir() {
@@ -52,22 +75,33 @@ async function writeJsonFile<T>(filename: string, data: T): Promise<void> {
 
 async function readJsonBlob<T>(filename: string, fallback: T): Promise<T> {
   try {
-    const result = await get(blobPath(filename), { access: "private" })
+    const result = await get(blobPath(filename), { access: blobAccess() })
     if (!result || result.statusCode !== 200 || !result.stream) return fallback
     const text = await new Response(result.stream).text()
     return JSON.parse(text) as T
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (
+      message.includes("private access on a public store") ||
+      message.includes("public access on a private store")
+    ) {
+      blobAccessHint(error)
+    }
     return fallback
   }
 }
 
 async function writeJsonBlob<T>(filename: string, data: T): Promise<void> {
-  await put(blobPath(filename), JSON.stringify(data, null, 2), {
-    access: "private",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    contentType: "application/json",
-  })
+  try {
+    await put(blobPath(filename), JSON.stringify(data, null, 2), {
+      access: blobAccess(),
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      contentType: "application/json",
+    })
+  } catch (error) {
+    blobAccessHint(error)
+  }
 }
 
 async function readJson<T>(filename: string, fallback: T): Promise<T> {
