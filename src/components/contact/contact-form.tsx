@@ -7,9 +7,14 @@ import { useLocale } from "@/i18n/locale-context"
 export const ContactForm = () => {
   const { dict } = useLocale()
   const [submitted, setSubmitted] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    setLoading(true)
+    setError("")
+
     const form = e.currentTarget
     const data = new FormData(form)
     const nombre = data.get("nombre") as string
@@ -17,10 +22,25 @@ export const ContactForm = () => {
     const asunto = data.get("asunto") as string
     const mensaje = data.get("mensaje") as string
 
-    const body = encodeURIComponent(`Name: ${nombre}\nEmail: ${email}\n\n${mensaje}`)
-    const subject = encodeURIComponent(asunto)
-    window.location.href = `mailto:${companyInfo.email}?subject=${subject}&body=${body}`
-    setSubmitted(true)
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nombre, email, asunto, mensaje }),
+      })
+
+      if (!res.ok) {
+        const body = (await res.json()) as { error?: string }
+        setError(body.error ?? "Error al enviar")
+        return
+      }
+
+      setSubmitted(true)
+    } catch {
+      setError("No se pudo enviar el mensaje. Intente nuevamente.")
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (submitted) {
@@ -39,6 +59,11 @@ export const ContactForm = () => {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
       <div>
         <label htmlFor="nombre" className="block text-sm font-medium text-slate-700">
           {dict.contact.name}
@@ -89,9 +114,10 @@ export const ContactForm = () => {
       </div>
       <button
         type="submit"
-        className="w-full rounded-xl bg-[#0096D6] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#007bb5]"
+        disabled={loading}
+        className="w-full rounded-xl bg-[#0096D6] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#007bb5] disabled:opacity-60"
       >
-        {dict.contact.send}
+        {loading ? "Enviando..." : dict.contact.send}
       </button>
     </form>
   )
