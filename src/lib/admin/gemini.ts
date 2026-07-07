@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai"
+import { getTopEmailTrainingExamples } from "./storage"
 import type { Contact } from "./types"
 
 export class GeminiHttpError extends Error {
@@ -127,9 +128,20 @@ export async function generateEmailDraft(
     .filter(Boolean)
     .join(" ")
 
+  const topExamples = await getTopEmailTrainingExamples(3)
+  const examplesBlock =
+    topExamples.length > 0
+      ? `\nEJEMPLOS DE REFERENCIA (emails con mayor puntaje histórico — usalos como guía de estilo y estructura, no copies literalmente):\n${topExamples
+          .map(
+            (ex, i) =>
+              `${i + 1}. [${ex.score}/100] Asunto: ${ex.asunto}\nMensaje:\n${ex.mensaje}`
+          )
+          .join("\n\n")}\n`
+      : ""
+
   const prompt = `Sos un experto en ventas B2B de compresores industriales libres de aceite para oxígeno (Air Products SRL, Argentina).
 Redactá un email comercial en español profesional pero cercano, orientado a maximizar la probabilidad de respuesta.
-
+${examplesBlock}
 DATOS DEL CONTACTO:
 - Nombre: ${contactName || "No especificado"}
 - Email: ${request.contact.email}
@@ -228,8 +240,7 @@ SECCIONES DEL PANEL:
 
 3. EMAILS (/admin/emails): Redactar y enviar emails comerciales.
    - Seleccionar un contacto destino
-   - La IA (Gemini) puede redactar el email automáticamente
-   - El sistema califica el email de 0 a 100 según probabilidad de respuesta
+   - La IA (Gemini) redacta el email y lo califica automáticamente
    - Solo se puede enviar si el score supera el umbral configurado (por defecto 70)
    - Campos: destino, asunto, mensaje
 

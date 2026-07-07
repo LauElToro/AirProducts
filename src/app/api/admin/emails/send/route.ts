@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     const threshold = getScoreThreshold()
     if (!body.force && (email.score === undefined || email.score < threshold)) {
       return jsonError(
-        `El email necesita score ≥ ${threshold} para enviarse. Score actual: ${email.score ?? "sin calificar"}. Califique primero.`,
+        `El email no alcanza el umbral recomendado (${threshold}%). Score: ${email.score ?? "sin evaluar"}.`,
         422
       )
     }

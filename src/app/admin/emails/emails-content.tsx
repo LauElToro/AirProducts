@@ -19,10 +19,11 @@ export default function AdminEmailsContent() {
   const [mensaje, setMensaje] = useState("")
   const [currentEmailId, setCurrentEmailId] = useState<string | null>(null)
   const [score, setScore] = useState<number | null>(null)
-  const [scoreFeedback, setScoreFeedback] = useState("")
-  const [scoreDetails, setScoreDetails] = useState<EmailRecord["scoreDetails"]>()
   const [loading, setLoading] = useState<string | null>(null)
   const [purpose, setPurpose] = useState("Seguimiento comercial para cotización")
+
+  const hasContent = Boolean(selectedContactId && destino && asunto && mensaje)
+  const meetsThreshold = score !== null && score >= threshold
 
   useEffect(() => {
     Promise.all([
@@ -43,12 +44,28 @@ export default function AdminEmailsContent() {
           setAsunto(email.asunto)
           setMensaje(email.mensaje)
           setScore(email.score ?? null)
-          setScoreFeedback(email.scoreFeedback ?? "")
-          setScoreDetails(email.scoreDetails)
         }
       }
     })
   }, [borradorId])
+
+  const syncEmail = async (): Promise<{ id: string; score: number | null }> => {
+    const payload = { contactId: selectedContactId, destino, asunto, mensaje }
+    const url = currentEmailId ? `/api/admin/emails/${currentEmailId}` : "/api/admin/emails"
+    const method = currentEmailId ? "PUT" : "POST"
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    const data = (await res.json()) as EmailRecord & { error?: string }
+    if (!res.ok || data.error || !data.id) {
+      throw new Error(data.error ?? "Error al guardar el borrador")
+    }
+    setCurrentEmailId(data.id)
+    setScore(data.score ?? null)
+    return { id: data.id, score: data.score ?? null }
+  }
 
   const handleDraft = async () => {
     if (!selectedContactId) return alert("Seleccione un contacto")
@@ -57,14 +74,35 @@ export default function AdminEmailsContent() {
       const res = await fetch("/api/admin/emails/draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contactId: selectedContactId, purpose }),
+        body: JSON.stringify({
+          contactId: selectedContactId,
+          purpose,
+          emailId: currentEmailId ?? undefined,
+          destino: destino || undefined,
+        }),
       })
-      const data = (await res.json()) as { asunto?: string; mensaje?: string; error?: string }
+      const data = (await res.json()) as {
+        asunto?: string
+        mensaje?: string
+        destino?: string
+        emailId?: string
+        score?: number
+        canSend?: boolean
+        error?: string
+      }
       if (!res.ok || data.error) return alert(data.error ?? "Error al generar borrador")
+
       setAsunto(data.asunto ?? "")
       setMensaje(data.mensaje ?? "")
-      setScore(null)
-      setScoreFeedback("")
+      if (data.destino) setDestino(data.destino)
+      if (data.emailId) setCurrentEmailId(data.emailId)
+      setScore(data.score ?? null)
+
+      if (data.canSend === false) {
+        alert(
+          `Borrador generado (calidad ${data.score ?? "—"}%). Podés enviarlo igual; el umbral recomendado es ${threshold}%.`
+        )
+      }
     } catch {
       alert("Error al generar borrador")
     } finally {
@@ -73,99 +111,51 @@ export default function AdminEmailsContent() {
   }
 
   const handleSave = async () => {
-    if (!selectedContactId || !destino || !asunto || !mensaje) {
-      return alert("Complete todos los campos")
-    }
+    if (!hasContent) return alert("Complete todos los campos")
     setLoading("save")
     try {
-      const url = currentEmailId ? `/api/admin/emails/${currentEmailId}` : "/api/admin/emails"
-      const method = currentEmailId ? "PUT" : "POST"
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contactId: selectedContactId, destino, asunto, mensaje }),
-      })
-      const data = (await res.json()) as EmailRecord & { error?: string }
-      if (data.error) return alert(data.error)
-      setCurrentEmailId(data.id)
-      setScore(data.score ?? null)
+      await syncEmail()
       alert("Email guardado")
-    } catch {
-      alert("Error al guardar")
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Error al guardar")
     } finally {
       setLoading(null)
     }
-  }
-
-  const handleScore = async () => {
-    if (!selectedContactId || !destino || !asunto || !mensaje) {
-      return alert("Complete todos los campos antes de calificar")
-    }
-
-    setLoading("score")
-    try {
-      let emailId = currentEmailId
-      if (!emailId) {
-        emailId = await handleSaveInternal()
-        setCurrentEmailId(emailId)
-      }
-
-      const res = await fetch("/api/admin/emails/score", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailId, asunto, mensaje, contactId: selectedContactId }),
-      })
-      const data = (await res.json()) as {
-        score: number
-        feedback: string
-        details: EmailRecord["scoreDetails"]
-        error?: string
-      }
-      if (!res.ok || data.error) return alert(data.error ?? "Error al calificar")
-      setScore(data.score)
-      setScoreFeedback(data.feedback)
-      setScoreDetails(data.details)
-    } catch {
-      alert("Error al calificar")
-    } finally {
-      setLoading(null)
-    }
-  }
-
-  const handleSaveInternal = async (): Promise<string> => {
-    const res = await fetch(
-      currentEmailId ? `/api/admin/emails/${currentEmailId}` : "/api/admin/emails",
-      {
-        method: currentEmailId ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contactId: selectedContactId, destino, asunto, mensaje }),
-      }
-    )
-    const data = (await res.json()) as EmailRecord & { error?: string }
-    if (data.error || !data.id) throw new Error(data.error ?? "Error al guardar")
-    return data.id
   }
 
   const handleSend = async () => {
-    if (!currentEmailId) return alert("Guarde el email primero")
-    if (score === null || score < threshold) {
-      return alert(`El email necesita calificación ≥ ${threshold}. Califique primero.`)
-    }
-    if (!confirm("¿Enviar este email al contacto?")) return
+    if (!hasContent) return alert("Complete todos los campos")
 
     setLoading("send")
     try {
+      const { id, score: latestScore } = await syncEmail()
+
+      const needsConfirm =
+        latestScore !== null && latestScore < threshold
+          ? confirm(
+              `Calidad del borrador: ${latestScore}% (recomendado ≥ ${threshold}%).\n\n¿Enviar igual?`
+            )
+          : confirm("¿Enviar este email al contacto?")
+
+      if (!needsConfirm) {
+        setLoading(null)
+        return
+      }
+
       const res = await fetch("/api/admin/emails/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailId: currentEmailId }),
+        body: JSON.stringify({
+          emailId: id,
+          force: latestScore !== null && latestScore < threshold,
+        }),
       })
       const data = (await res.json()) as { error?: string }
-      if (data.error) return alert(data.error)
+      if (!res.ok || data.error) return alert(data.error ?? "Error al enviar")
       alert("¡Email enviado correctamente!")
       resetForm()
-    } catch {
-      alert("Error al enviar")
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Error al enviar")
     } finally {
       setLoading(null)
     }
@@ -178,8 +168,6 @@ export default function AdminEmailsContent() {
     setMensaje("")
     setCurrentEmailId(null)
     setScore(null)
-    setScoreFeedback("")
-    setScoreDetails(undefined)
   }
 
   const fieldClass =
@@ -188,11 +176,12 @@ export default function AdminEmailsContent() {
   return (
     <AdminShell
       title="Emails Comerciales"
-      subtitle="Redacte con IA, califique y envíe emails optimizados para ventas"
+      subtitle="Redacte con IA y envíe emails optimizados para ventas"
     >
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <p className="text-lg text-slate-600">
-          Umbral mínimo para enviar: <strong className="text-[#0096D6]">{threshold}%</strong>
+          La IA evalúa cada borrador automáticamente. Umbral recomendado:{" "}
+          <strong className="text-[#0096D6]">{threshold}%</strong>
         </p>
         <div className="flex gap-3">
           <Link
@@ -255,7 +244,7 @@ export default function AdminEmailsContent() {
               disabled={loading === "draft" || !selectedContactId}
               className="w-full rounded-xl bg-violet-600 py-3 text-lg font-bold text-white hover:bg-violet-700 disabled:opacity-50"
             >
-              {loading === "draft" ? "Generando con IA..." : "✨ Redactar con Gemini"}
+              {loading === "draft" ? "Generando y evaluando con IA..." : "✨ Redactar con Gemini"}
             </button>
 
             <label className="block">
@@ -288,97 +277,41 @@ export default function AdminEmailsContent() {
             </label>
           </div>
 
+          {score !== null && (
+            <p
+              className={cn(
+                "mt-4 rounded-xl px-4 py-3 text-lg font-semibold",
+                meetsThreshold
+                  ? "bg-green-50 text-green-800"
+                  : "bg-amber-50 text-amber-900"
+              )}
+            >
+              {meetsThreshold
+                ? `✓ Borrador evaluado (${score}%) — listo para enviar`
+                : `Borrador evaluado (${score}%). Umbral recomendado: ${threshold}%. Podés enviar igual.`}
+            </p>
+          )}
+
           <div className="mt-6 flex flex-wrap gap-3">
             <button
               type="button"
               onClick={handleSave}
-              disabled={!!loading}
+              disabled={!!loading || !hasContent}
               className="rounded-xl bg-slate-700 px-6 py-3 text-lg font-bold text-white hover:bg-slate-600 disabled:opacity-50"
             >
               {loading === "save" ? "Guardando..." : "Guardar borrador"}
             </button>
             <button
               type="button"
-              onClick={handleScore}
-              disabled={!!loading || !asunto || !mensaje}
-              className="rounded-xl bg-amber-500 px-6 py-3 text-lg font-bold text-white hover:bg-amber-600 disabled:opacity-50"
-            >
-              {loading === "score" ? "Calificando..." : "📊 Calificar email"}
-            </button>
-            <button
-              type="button"
               onClick={handleSend}
-              disabled={!!loading || score === null || score < threshold || !currentEmailId}
+              disabled={!!loading || !hasContent}
               className="rounded-xl bg-[#0096D6] px-6 py-3 text-lg font-bold text-white hover:bg-[#007bb5] disabled:opacity-50"
             >
               {loading === "send" ? "Enviando..." : "📤 Enviar email"}
             </button>
           </div>
         </div>
-
-        {score !== null && (
-          <ScorePanel
-            score={score}
-            threshold={threshold}
-            feedback={scoreFeedback}
-            details={scoreDetails}
-          />
-        )}
       </div>
     </AdminShell>
-  )
-}
-
-function ScorePanel({
-  score,
-  threshold,
-  feedback,
-  details,
-}: {
-  score: number
-  threshold: number
-  feedback: string
-  details?: EmailRecord["scoreDetails"]
-}) {
-  const passed = score >= threshold
-  return (
-    <div
-      className={cn(
-        "rounded-2xl border-2 p-6",
-        passed ? "border-green-300 bg-green-50" : "border-amber-300 bg-amber-50"
-      )}
-    >
-      <div className="flex items-center justify-between">
-        <h3 className="text-2xl font-bold text-slate-900">Calificación del email</h3>
-        <div className="text-center">
-          <p className={cn("text-5xl font-black", passed ? "text-green-600" : "text-amber-600")}>
-            {score}%
-          </p>
-          <p className="text-sm font-semibold">
-            {passed ? "✓ Listo para enviar" : `Necesita ≥ ${threshold}%`}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-4 h-4 overflow-hidden rounded-full bg-slate-200">
-        <div
-          className={cn("h-full transition-all", passed ? "bg-green-500" : "bg-amber-500")}
-          style={{ width: `${score}%` }}
-        />
-      </div>
-
-      {feedback && <p className="mt-4 text-lg text-slate-700">{feedback}</p>}
-
-      {details && (
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          {Object.entries(details).map(([key, val]) => (
-            <div key={key} className="rounded-lg bg-white/80 p-3">
-              <p className="text-sm capitalize text-slate-500">{key.replace(/([A-Z])/g, " $1")}</p>
-              <p className="text-xl font-bold text-slate-900">{val}%</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   )
 }

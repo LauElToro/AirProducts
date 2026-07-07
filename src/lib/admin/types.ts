@@ -109,3 +109,14 @@ export type EmailInput = Pick<
   EmailRecord,
   "contactId" | "destino" | "asunto" | "mensaje"
 >
+
+export type EmailTrainingExample = {
+  id: string
+  emailId?: string
+  asunto: string
+  mensaje: string
+  score: number
+  feedback: string
+  purpose?: string
+  createdAt: string
+}

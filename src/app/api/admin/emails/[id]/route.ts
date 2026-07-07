@@ -1,10 +1,13 @@
 import { NextRequest } from "next/server"
-import { requireAuth, jsonError, jsonOk } from "@/lib/admin/api-helpers"
+import { requireAuth, jsonError, jsonOk, geminiRouteError } from "@/lib/admin/api-helpers"
+import { scoreEmail, getScoreThreshold } from "@/lib/admin/gemini"
 import {
   createEditRecord,
   diffChanges,
+  getContactById,
   getEmails,
   saveEmails,
+  upsertEmailTrainingExample,
 } from "@/lib/admin/storage"
 import type { EmailRecord } from "@/lib/admin/types"
 
@@ -49,11 +52,10 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       mensaje: body.mensaje?.trim() ?? before.mensaje,
       contactId: body.contactId ?? before.contactId,
       updatedAt: new Date().toISOString(),
-      score: undefined,
-      scoreFeedback: undefined,
-      scoreDetails: undefined,
-      status: "draft",
     }
+
+    const contentChanged =
+      before.asunto !== updated.asunto || before.mensaje !== updated.mensaje
 
     const changes = diffChanges(
       before as unknown as Record<string, unknown>,
@@ -66,14 +68,46 @@ export async function PUT(request: NextRequest, context: RouteContext) {
         ...before.editHistory,
         createEditRecord("update", changes, "Email actualizado"),
       ]
+    } else {
+      updated.editHistory = before.editHistory
+    }
+
+    if (contentChanged) {
+      const contact = await getContactById(updated.contactId)
+      const scoring = await scoreEmail(updated.asunto, updated.mensaje, contact)
+      updated.score = scoring.score
+      updated.scoreFeedback = scoring.feedback
+      updated.scoreDetails = scoring.details
+      updated.status = "scored"
+      updated.editHistory = [
+        ...updated.editHistory,
+        createEditRecord(
+          "update",
+          { score: { from: before.score, to: scoring.score } },
+          `Recalificado automáticamente: ${scoring.score}/100`
+        ),
+      ]
+
+      await upsertEmailTrainingExample({
+        emailId: updated.id,
+        asunto: updated.asunto,
+        mensaje: updated.mensaje,
+        score: scoring.score,
+        feedback: scoring.feedback,
+      })
     }
 
     emails[index] = updated
     await saveEmails(emails)
-    return jsonOk(updated)
+
+    const threshold = getScoreThreshold()
+    return jsonOk({
+      ...updated,
+      threshold,
+      canSend: (updated.score ?? 0) >= threshold,
+    })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Error al actualizar"
-    return jsonError(message, 500)
+    return geminiRouteError(error)
   }
 }
 

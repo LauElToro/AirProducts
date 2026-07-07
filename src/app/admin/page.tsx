@@ -134,7 +134,7 @@ export default function AdminDashboardPage() {
             agregar uno.
           </li>
           <li>
-            <strong>2. Emails:</strong> Redacte, califique y envíe. El historial está en su propia sección.
+            <strong>2. Emails:</strong> Redacte con IA y envíe. El historial está en su propia sección.
           </li>
           <li>
             <strong>3. Métricas:</strong> Vea quién visita el sitio y dónde hacen clic.

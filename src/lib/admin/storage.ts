@@ -8,6 +8,7 @@ import type {
   Contact,
   EditRecord,
   EmailRecord,
+  EmailTrainingExample,
 } from "./types"
 
 const DATA_DIR = path.join(process.cwd(), "json-data")
@@ -18,6 +19,7 @@ const FILES = {
   emails: "emails.json",
   chat: "chat-sessions.json",
   analytics: "analytics.json",
+  emailTraining: "email-training.json",
 } as const
 
 function useBlobStorage(): boolean {
@@ -168,6 +170,58 @@ export async function saveEmails(emails: EmailRecord[]): Promise<void> {
 export async function getEmailById(id: string): Promise<EmailRecord | undefined> {
   const emails = await getEmails()
   return emails.find((e) => e.id === id)
+}
+
+export async function getEmailTrainingExamples(): Promise<EmailTrainingExample[]> {
+  return readJson<EmailTrainingExample[]>(FILES.emailTraining, [])
+}
+
+export async function saveEmailTrainingExamples(
+  examples: EmailTrainingExample[]
+): Promise<void> {
+  await writeJson(FILES.emailTraining, examples)
+}
+
+export async function getTopEmailTrainingExamples(
+  limit = 3
+): Promise<EmailTrainingExample[]> {
+  const examples = await getEmailTrainingExamples()
+  return [...examples].sort((a, b) => b.score - a.score).slice(0, limit)
+}
+
+export async function upsertEmailTrainingExample(data: {
+  emailId?: string
+  asunto: string
+  mensaje: string
+  score: number
+  feedback: string
+  purpose?: string
+}): Promise<EmailTrainingExample> {
+  const examples = await getEmailTrainingExamples()
+  const now = new Date().toISOString()
+  const record: EmailTrainingExample = {
+    id: uuidv4(),
+    emailId: data.emailId,
+    asunto: data.asunto,
+    mensaje: data.mensaje,
+    score: data.score,
+    feedback: data.feedback,
+    purpose: data.purpose,
+    createdAt: now,
+  }
+
+  if (data.emailId) {
+    const index = examples.findIndex((e) => e.emailId === data.emailId)
+    if (index !== -1) {
+      examples[index] = { ...record, id: examples[index].id, createdAt: examples[index].createdAt }
+      await saveEmailTrainingExamples(examples)
+      return examples[index]
+    }
+  }
+
+  examples.push(record)
+  await saveEmailTrainingExamples(examples)
+  return record
 }
 
 export async function getChatSessions(): Promise<ChatSession[]> {
