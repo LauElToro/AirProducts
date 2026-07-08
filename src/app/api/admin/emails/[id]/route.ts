@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 import { requireAuth, jsonError, jsonOk, geminiRouteError } from "@/lib/admin/api-helpers"
-import { scoreEmail, getScoreThreshold } from "@/lib/admin/gemini"
+import { scoreEmail, getScoreThreshold, normalizeEmailSubject } from "@/lib/admin/gemini"
 import {
   createEditRecord,
   diffChanges,
@@ -48,7 +48,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     const updated: EmailRecord = {
       ...before,
       destino: body.destino?.trim() ?? before.destino,
-      asunto: body.asunto?.trim() ?? before.asunto,
+      asunto: normalizeEmailSubject(body.asunto?.trim() ?? before.asunto),
       mensaje: body.mensaje?.trim() ?? before.mensaje,
       contactId: body.contactId ?? before.contactId,
       updatedAt: new Date().toISOString(),

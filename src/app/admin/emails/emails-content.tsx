@@ -4,6 +4,12 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { AdminShell } from "@/components/admin/admin-shell"
+import {
+  CUSTOM_EMAIL_PURPOSE_ID,
+  EMAIL_PURPOSES,
+  resolveEmailPurposePrompt,
+  suggestEmailPurposeId,
+} from "@/lib/admin/email-purposes"
 import type { Contact, EmailRecord } from "@/lib/admin/types"
 import { cn } from "@/lib/utils"
 
@@ -20,7 +26,11 @@ export default function AdminEmailsContent() {
   const [currentEmailId, setCurrentEmailId] = useState<string | null>(null)
   const [score, setScore] = useState<number | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
-  const [purpose, setPurpose] = useState("Seguimiento comercial para cotización")
+  const [purposeId, setPurposeId] = useState("seguimiento_cotizacion")
+  const [customPurpose, setCustomPurpose] = useState("")
+
+  const selectedPurpose = EMAIL_PURPOSES.find((p) => p.id === purposeId)
+  const purposeForAi = resolveEmailPurposePrompt(purposeId, customPurpose)
 
   const hasContent = Boolean(selectedContactId && destino && asunto && mensaje)
   const meetsThreshold = score !== null && score >= threshold
@@ -67,8 +77,17 @@ export default function AdminEmailsContent() {
     return { id: data.id, score: data.score ?? null }
   }
 
+  const applyContactSelection = (contact: Contact) => {
+    setDestino(contact.email)
+    setPurposeId(suggestEmailPurposeId(contact))
+    setCustomPurpose("")
+  }
+
   const handleDraft = async () => {
     if (!selectedContactId) return alert("Seleccione un contacto")
+    if (purposeId === CUSTOM_EMAIL_PURPOSE_ID && !customPurpose.trim()) {
+      return alert("Describa el propósito personalizado")
+    }
     setLoading("draft")
     try {
       const res = await fetch("/api/admin/emails/draft", {
@@ -76,7 +95,8 @@ export default function AdminEmailsContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contactId: selectedContactId,
-          purpose,
+          purpose: purposeForAi,
+          purposeId,
           emailId: currentEmailId ?? undefined,
           destino: destino || undefined,
         }),
@@ -126,28 +146,27 @@ export default function AdminEmailsContent() {
   const handleSend = async () => {
     if (!hasContent) return alert("Complete todos los campos")
 
+    const belowThreshold = score !== null && score < threshold
+    const confirmed = belowThreshold
+      ? confirm(
+          `Calidad del borrador: ${score}% (recomendado ≥ ${threshold}%).\n\n¿Enviar con el contenido actual del formulario?`
+        )
+      : confirm("¿Enviar este email con el contenido actual del formulario?")
+
+    if (!confirmed) return
+
     setLoading("send")
     try {
-      const { id, score: latestScore } = await syncEmail()
-
-      const needsConfirm =
-        latestScore !== null && latestScore < threshold
-          ? confirm(
-              `Calidad del borrador: ${latestScore}% (recomendado ≥ ${threshold}%).\n\n¿Enviar igual?`
-            )
-          : confirm("¿Enviar este email al contacto?")
-
-      if (!needsConfirm) {
-        setLoading(null)
-        return
-      }
-
       const res = await fetch("/api/admin/emails/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          emailId: id,
-          force: latestScore !== null && latestScore < threshold,
+          emailId: currentEmailId ?? undefined,
+          contactId: selectedContactId,
+          destino,
+          asunto,
+          mensaje,
+          force: belowThreshold,
         }),
       })
       const data = (await res.json()) as { error?: string }
@@ -215,7 +234,7 @@ export default function AdminEmailsContent() {
                   const id = e.target.value
                   setSelectedContactId(id)
                   const contact = contacts.find((c) => c.id === id)
-                  if (contact) setDestino(contact.email)
+                  if (contact) applyContactSelection(contact)
                 }}
                 className={fieldClass}
               >
@@ -231,11 +250,28 @@ export default function AdminEmailsContent() {
 
             <label className="block">
               <span className="mb-1 block text-lg font-semibold">Propósito del email</span>
-              <input
-                value={purpose}
-                onChange={(e) => setPurpose(e.target.value)}
+              <select
+                value={purposeId}
+                onChange={(e) => setPurposeId(e.target.value)}
                 className={fieldClass}
-              />
+              >
+                {EMAIL_PURPOSES.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {selectedPurpose && (
+                <p className="mt-2 text-base text-slate-600">{selectedPurpose.hint}</p>
+              )}
+              {purposeId === CUSTOM_EMAIL_PURPOSE_ID && (
+                <input
+                  value={customPurpose}
+                  onChange={(e) => setCustomPurpose(e.target.value)}
+                  placeholder="Describa el objetivo de este email..."
+                  className={cn(fieldClass, "mt-3")}
+                />
+              )}
             </label>
 
             <button

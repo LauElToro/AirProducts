@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai"
+import { formatContactContextForAi } from "./contact-context"
 import { getTopEmailTrainingExamples } from "./storage"
 import type { Contact } from "./types"
 
@@ -121,12 +122,22 @@ export type EmailDraftResult = {
   mensaje: string
 }
 
+const SUBJECT_GREETING_PATTERN =
+  /^(?:(?:hola|buenas|buen\s+d[ií]a|buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches|saludos|estimad[oa]s?|querid[oa]s?|apreciad[oa]s?)(?:\s+[A-Za-zÀ-ÿ][\wÀ-ÿ.-]*)?)\s*[,:\-–—]?\s*/i
+
+export function normalizeEmailSubject(asunto: string): string {
+  let subject = asunto.trim().replace(/^["']|["']$/g, "")
+  subject = subject.replace(SUBJECT_GREETING_PATTERN, "").trim()
+  subject = subject.replace(/^[-–—:\s]+/, "").trim()
+  return subject || asunto.trim()
+}
+
 export async function generateEmailDraft(
   request: EmailDraftRequest
 ): Promise<EmailDraftResult> {
-  const contactName = [request.contact.nombre, request.contact.apellido]
-    .filter(Boolean)
-    .join(" ")
+  const contactContext = formatContactContextForAi(request.contact)
+  const interesProducto =
+    request.productInterest || request.contact.interesProducto || "Serie OX - compresores booster"
 
   const topExamples = await getTopEmailTrainingExamples(3)
   const examplesBlock =
@@ -142,25 +153,32 @@ export async function generateEmailDraft(
   const prompt = `Sos un experto en ventas B2B de compresores industriales libres de aceite para oxígeno (Air Products SRL, Argentina).
 Redactá un email comercial en español profesional pero cercano, orientado a maximizar la probabilidad de respuesta.
 ${examplesBlock}
-DATOS DEL CONTACTO:
-- Nombre: ${contactName || "No especificado"}
-- Email: ${request.contact.email}
-- Empresa: ${request.contact.empresa || "No especificada"}
-- Ubicación: ${request.contact.lugar || "No especificada"}
-- Interés en producto: ${request.productInterest || request.contact.interesProducto || "Serie OX - compresores booster"}
-- Veces que compró: ${request.contact.vecesCompro}
-- Frecuencia de contacto: ${request.contact.frecuencia}
-- Puntos de interés: ${request.contact.puntosInteres.join(", ") || "No especificados"}
-- Notas: ${request.contact.notas || "Ninguna"}
+FICHA COMPLETA DEL CONTACTO (usá TODA esta información para personalizar el email):
+${contactContext}
 
-PROPÓSITO DEL EMAIL: ${request.purpose || "Seguimiento comercial para generar venta o cotización"}
-TONO DESEADO: ${request.tone || "Profesional, confiable, orientado a soluciones"}
-CONTEXTO ADICIONAL: ${request.additionalContext || "Ninguno"}
+ENFOQUE PARA ESTE EMAIL (objetivo principal — todo el mail debe girar en torno a esto):
+- ${request.purpose || "Seguimiento comercial para generar venta o cotización"}
+- Producto / línea a destacar: ${interesProducto}
+- Tono: ${request.tone || "Profesional, confiable, orientado a soluciones"}
+- Contexto adicional: ${request.additionalContext || "Ninguno"}
 
-IMPORTANTE:
-- El email debe ser conciso (máximo 200 palabras en el cuerpo)
-- Incluir una llamada a acción clara
-- Personalizar con los datos del contacto
+PASO PREVIO (mental, no lo escribas en la respuesta):
+1. Definí el objetivo concreto de ESTE email para ESTE contacto según su ficha (¿reactivar? ¿cotizar? ¿seguimiento post-compra? ¿primer contacto?)
+2. Elegí qué datos del contacto vas a usar para que se sienta hecho a medida (empresa, producto de interés, historial, notas, ubicación)
+
+REGLAS DEL ASUNTO (campo "asunto"):
+- SOLO el asunto: una línea clara, directa y profesional
+- PROHIBIDO saludos o fórmulas sociales: no uses "Hola", "Buenas", "Buenos días", "Estimado", "Saludos", etc.
+- Debe reflejar el objetivo específico para este cliente (mencionar empresa, producto o situación cuando aplique)
+- Ejemplos válidos: "Cotización compresor OX300 para Liberty Club", "Seguimiento post-entrega — repuestos Serie OX"
+- Ejemplos inválidos: "Hola, cotización OX300", "Buenas — seguimiento comercial"
+
+REGLAS DEL MENSAJE (campo "mensaje"):
+- Personalizá al máximo usando la ficha del contacto; el lector debe sentir que el mail es para él/ella, no genérico
+- Si ya compró o hubo emails previos, adaptá el enfoque (seguimiento vs. primer acercamiento)
+- Los saludos van SOLO en el cuerpo del mensaje, nunca en el asunto
+- Máximo 200 palabras en el cuerpo
+- Llamada a acción clara y concreta acorde al objetivo definido
 - No inventar datos que no fueron provistos
 - Firmar como "Equipo Comercial - Air Products SRL"
 
@@ -175,6 +193,7 @@ Respondé ÚNICAMENTE con JSON válido (sin markdown):
   if (!parsed.asunto || !parsed.mensaje) {
     throw new GeminiHttpError("Respuesta incompleta de Gemini", 502)
   }
+  parsed.asunto = normalizeEmailSubject(parsed.asunto)
   return parsed
 }
 
@@ -195,14 +214,20 @@ export async function scoreEmail(
   mensaje: string,
   contact?: Contact
 ): Promise<EmailScoreResult> {
-  const prompt = `Sos un experto en email marketing B2B industrial. Evaluá este email comercial de Air Products SRL (compresores de oxígeno).
+  const contactBlock = contact
+    ? `\nFICHA COMPLETA DEL CONTACTO (evaluá si el email aprovecha esta información):\n${formatContactContextForAi(contact)}\n`
+    : ""
 
-DESTINATARIO: ${contact ? `${contact.nombre || ""} ${contact.apellido || ""} (${contact.empresa || "sin empresa"})` : "Contacto comercial"}
+  const prompt = `Sos un experto en email marketing B2B industrial. Evaluá este email comercial de Air Products SRL (compresores de oxígeno).
+${contactBlock}
 ASUNTO: ${asunto}
 MENSAJE:
 ${mensaje}
 
 Evaluá de 0 a 100 cada criterio y calculá un score general (promedio ponderado donde probabilidadRespuesta pesa 30%, personalizacion 25%, llamadaAccion 20%, claridad 15%, tonoProfesional 10%).
+En personalización, penalizá emails genéricos que ignoren datos clave del contacto (empresa, historial, intereses, notas).
+Penalizá asuntos con saludos ("Hola", "Buenas", etc.) — el asunto debe ser solo tema/objetivo del mail.
+Evaluá si el email tiene un objetivo claro y adaptado a la situación de este contacto en particular.
 
 Respondé ÚNICAMENTE con JSON válido (sin markdown):
 {
